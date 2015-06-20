@@ -1,0 +1,116 @@
+---
+title: "Practical Machine Learning Course Project"
+output: html_document
+---
+
+###Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+###Data
+The training data for this project are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+###Pre-processing
+```{r}
+set.seed(2222)
+library(RCurl); library(caret)
+trainData <- read.csv("pml-training.csv", na.strings=c("NA",""), strip.white=T)
+testData <- read.csv("pml-testing.csv", na.strings=c("NA",""), strip.white=T)
+dim(trainData) ; dim(testData)
+```
+We need to identify the variables in the datasets that have no NA or missing values. Once identified, we can proceed to apply them as potential predictors for this analysis.
+
+```{r}
+isNA <- apply(trainData, 2, function(x) { sum(is.na(x)) })
+trainData <- subset(trainData[, which(isNA == 0)], 
+                    select=-c(X, user_name, new_window, num_window, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp))
+pred <- colnames(trainData)
+predictors <- as.vector(unlist(strsplit(pred,",")),mode="list")
+testData <- subset(testData[, which(colnames(testData) %in% predictors)])
+pred
+```
+
+We can further narrow down the predictors used for our analysis by leaving out those variables that have very little variablity.
+
+```{r, results='hide'}
+classecol <- grep("classe", colnames(trainData))
+nzv <- nearZeroVar(trainData[,-classecol], saveMetrics = TRUE)
+#See Appendix for results
+```
+There appears to be no zero covariates hence we can keep the 53 predictors as shown before.
+
+The analysis requires us to predict for the variable "classe". This variable is summarized as follows and is a factor variable.
+
+```{r}
+summary(trainData[,"classe"])
+```
+###Splitting Data
+We can now proceed to split the training set data further to a training (60%) and probe dataset (40%).
+
+```{r}
+inTrain <- createDataPartition(trainData$classe, p=0.6, list = FALSE)
+trainD <- trainData[inTrain,]
+probeD <- trainData[-inTrain,]
+dim(trainD) ; dim(probeD)
+```
+
+###Training a Prediction Model using Random Forest
+With Random Forest, we can be assured of more accurate prediction results. I should expect an out of sample error rate of less than 2%.
+
+```{r}
+library(parallel)
+library(doParallel)
+cl <- makeCluster(detectCores())
+registerDoParallel(cl)
+model <- train(classe ~ ., method = "rf", data=trainD, preProcess=c("center","scale"))
+model
+stopCluster(cl)
+```
+
+###Evaluate Model with the Probe Dataset
+We can now evaluate the above model with the probe dataset (probeD).
+
+```{r}
+probePredict <- predict(model, probeD)
+confusionMatrix(probePredict, probeD[,"classe"])
+```
+
+###The Final Model
+```{r}
+varImp(model)
+model$finalModel
+```
+Based on the confusion matrix we have an accuracy rate of 99.2%. We also see a out of sample error rate of 0.87%.
+
+###Evaluate Model with the Test Dataset
+```{r}
+testPredict <- predict(model, testData)
+testPredict
+```
+
+###Prediction Submission
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",                                                     i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(testPredict)
+```
+
+###Appendix
+Zero Covariates
+```{r, echo=FALSE}
+library(caret)
+classecol <- grep("classe", colnames(trainData))
+nzv <- nearZeroVar(trainData[,-classecol], saveMetrics = TRUE)
+nzv
+```
+
